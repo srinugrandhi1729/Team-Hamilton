@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cayley-Hamilton Verifier</title>
+<style>
+:root{--bg:#fff;--fg:#1d1d22;--card:#f3f3f8;--ac:#5b4bdb;--mut:#6b6b78;--ok:#188a4a;--bad:#c62f3b;--o:#e8743b;--g:#19a979;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15151a;--fg:#ececf2;--card:#202028;--ac:#8d80ff;--mut:#9a9aa8;--ok:#4cd68a;--bad:#ff7b86}}
+:root[data-theme="dark"]{--bg:#15151a;--fg:#ececf2;--card:#202028;--ac:#8d80ff;--mut:#9a9aa8;--ok:#4cd68a;--bad:#ff7b86}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:.2rem 0}h2{font-size:1rem;margin:0 0 .5rem;color:var(--ac)}
+.sub{color:var(--mut);margin:0 0 14px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin:12px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.seg button{border:1px solid var(--ac);background:none;color:var(--ac);padding:6px 14px;font:inherit;cursor:pointer}
+.seg button:first-child{border-radius:8px 0 0 8px}.seg button:last-child{border-radius:0 8px 8px 0}
+.seg button.on{background:var(--ac);color:var(--bg)}
+.grid{display:grid;gap:6px;margin:12px 0}
+input{width:100%;min-width:0;padding:8px;border-radius:8px;border:1px solid var(--mut);background:var(--bg);color:var(--fg);font:inherit;text-align:center}
+.k{width:80px}
+.go{background:var(--ac);color:var(--bg);border:0;border-radius:10px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer}
+.mono{font-family:ui-monospace,Menlo,monospace}
+table.m{border-left:2px solid var(--fg);border-right:2px solid var(--fg);border-radius:6px;margin:4px 0;padding:0 6px}
+table.m td{padding:2px 10px;text-align:right}
+.scroll{overflow-x:auto}
+.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+canvas{width:100%;height:220px;display:block}
+.note{color:var(--mut);font-size:.85rem}
+</style></head><body><main>
+<h1>Cayley-Hamilton Verifier (C7)</h1>
+<p class="sub">Enter a 2×2 or 3×3 matrix. Every matrix satisfies its own characteristic equation: p(A) = 0.</p>
+<div class="card">
+  <div class="row"><div class="seg"><button id="b2">2×2</button><button id="b3" class="on">3×3</button></div>
+  <label>Power k <input id="k" class="k" type="number" min="1" max="200" value="8"></label></div>
+  <div id="grid" class="grid"></div>
+  <button class="go" id="run">Run Cayley-Hamilton</button>
+</div>
+<div id="out"></div>
+<p class="note">Assumptions: real entries; A⁻¹ needs det A ≠ 0; "direct" = repeated multiplication A·A·…·A. Floating-point JavaScript is used here; the Colab notebook uses exact SymPy.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let n=3;
+const defaults=[[2,1,0],[0,3,1],[1,0,2]];
+// ---------- matrix helpers (plain arrays) ----------
+const Z=n=>Array.from({length:n},()=>Array(n).fill(0));
+const I=n=>Z(n).map((r,i)=>r.map((_,j)=>+(i==j)));
+const mul=(A,B)=>A.map((r,i)=>r.map((_,j)=>r.reduce((s,_,k)=>s+A[i][k]*B[k][j],0)));
+const add=(A,B)=>A.map((r,i)=>r.map((v,j)=>v+B[i][j]));
+const scl=(A,s)=>A.map(r=>r.map(v=>v*s));
+// (a) Faddeev-LeVerrier: returns [1, c_{n-1}, ..., c0] of p(l)=det(lI-A)
+function charPoly(A){const m=A.length;let M=Z(m);const c=[1];
+  for(let k=1;k<=m;k++){M=add(mul(A,M),scl(I(m),c[k-1]));const AM=mul(A,M);let t=0;for(let i=0;i<m;i++)t+=AM[i][i];c.push(-t/k);}
+  return c;}
+// Horner: evaluate polynomial (highest first) at a matrix
+const horner=(c,A)=>c.reduce((R,x)=>add(mul(R,A),scl(I(A.length),x)),Z(A.length));
+// (c) A^-1 = -(1/c0)(A^{n-1}+c_{n-1}A^{n-2}+...+c1 I)
+function inverse(A,c){const c0=c[c.length-1];if(Math.abs(c0)<1e-12)return null;return scl(horner(c.slice(0,-1),A),-1/c0);}
+// (d) remainder of x^k mod p(x) (low->high), then A^k = r(A)
+function remainder(c,k){const m=c.length-1,low=[...c].reverse();let r=Array(m).fill(0);r[0]=1;
+  for(let s=0;s<k;s++){const top=r[m-1];for(let i=m-1;i>0;i--)r[i]=r[i-1];r[0]=0;for(let i=0;i<m;i++)r[i]-=top*low[i];}return r;}
+const chPow=(A,c,k)=>horner(remainder(c,k).reverse(),A);
+const directPow=(A,k)=>{let R=I(A.length);for(let i=0;i<k;i++)R=mul(R,A);return R;};
+const sqPow=(A,k)=>{let R=I(A.length),B=A;while(k>0){if(k&1)R=mul(R,B);B=mul(B,B);k>>=1;}return R;};
+// (e) timing in microseconds per call
+function bench(f){const reps=2000;f();let best=1e9;for(let b=0;b<5;b++){const t=performance.now();for(let i=0;i<reps;i++)f();best=Math.min(best,(performance.now()-t)/reps*1000);}return best;}
+// ---------- formatting ----------
+const fmt=v=>{if(!isFinite(v))return String(v);const r=Math.abs(v)<1e-9?0:v;return Number(r.toPrecision(7)).toString();};
+const maxAbs=A=>Math.max(...A.flat().map(Math.abs));
+function mat(A){return '<table class="m mono">'+A.map(r=>'<tr>'+r.map(v=>'<td>'+fmt(v)+'</td>').join('')+'</tr>').join('')+'</table>';}
+function eqn(c){const m=c.length-1;let s='';c.forEach((x,i)=>{const p=m-i;if(Math.abs(x)<1e-9)return;const a=Math.abs(x),sg=x<0?'−':'+';
+  const co=(a===1&&p>0)?'':fmt(a);const v=p===0?'':'λ'+(p>1?'<sup>'+p+'</sup>':'');s+=(s?' '+sg+' ':(x<0?'−':''))+co+v;});return s+' = 0';}
+// ---------- UI ----------
+function build(){const g=$('grid');g.style.gridTemplateColumns='repeat('+n+',1fr)';g.innerHTML='';
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++){const e=document.createElement('input');e.type='number';e.step='any';e.id='a'+i+j;e.value=(defaults[i]||[])[j]??0;g.appendChild(e);}
+  $('b2').classList.toggle('on',n==2);$('b3').classList.toggle('on',n==3);}
+$('b2').onclick=()=>{n=2;build();};$('b3').onclick=()=>{n=3;build();};
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function plot(A,ks){const cv=document.createElement('canvas');$('chart').appendChild(cv);
+  const d=devicePixelRatio||1,W=cv.clientWidth,H=220;cv.width=W*d;cv.height=H*d;const x=cv.getContext('2d');x.scale(d,d);
+  const S=[['Cayley-Hamilton',css('--ac'),k=>chPow(A,charPoly(A),k)],['Direct',css('--o'),k=>directPow(A,k)],['Squaring',css('--g'),k=>sqPow(A,k)]]
+    .map(([l,col,f])=>[l,col,ks.map(k=>bench(()=>f(k)))]);
+  const mx=Math.max(...S.flatMap(s=>s[2])),px=34,py=14,pw=W-px-10,ph=H-py-44;
+  x.strokeStyle=css('--mut');x.fillStyle=css('--mut');x.font='11px system-ui';x.lineWidth=1;
+  x.beginPath();x.moveTo(px,py);x.lineTo(px,py+ph);x.lineTo(px+pw,py+ph);x.stroke();
+  x.fillText(fmt(mx)+' µs',2,py+8);x.fillText('0',px-10,py+ph);
+  ks.forEach((k,i)=>x.fillText(k,px+i/(ks.length-1)*pw-6,py+ph+14));
+  S.forEach(([l,col,t],si)=>{x.strokeStyle=col;x.fillStyle=col;x.lineWidth=2;x.beginPath();
+    t.forEach((v,i)=>{const X=px+i/(ks.length-1)*pw,Y=py+ph-v/mx*ph;i?x.lineTo(X,Y):x.moveTo(X,Y);});x.stroke();
+    x.fillRect(px+si*105,H-16,10,10);x.fillStyle=css('--fg');x.fillText(l,px+si*105+14,H-7);});}
+$('run').onclick=()=>{
+  const A=[...Array(n)].map((_,i)=>[...Array(n)].map((_,j)=>parseFloat($('a'+i+j).value)||0));
+  const k=Math.max(1,Math.min(200,parseInt($('k').value)||8));
+  const c=charPoly(A),pA=horner(c,A),inv=inverse(A,c),Ak=chPow(A,c,k),Ad=directPow(A,k);
+  const err=maxAbs(add(Ak,scl(Ad,-1)))/Math.max(1,maxAbs(Ad));
+  const tc=bench(()=>chPow(A,charPoly(A),k)),td=bench(()=>directPow(A,k)),ts=bench(()=>sqPow(A,k));
+  const verified=maxAbs(pA)<1e-6*Math.max(1,maxAbs(A)**n);
+  $('out').innerHTML=
+   '<div class="card"><h2>(a) Characteristic equation</h2><div class="mono">'+eqn(c)+'</div><div class="note">p(λ) = det(λI − A)</div></div>'+
+   '<div class="card"><h2>(b) Verify p(A) = 0</h2><div class="scroll">'+mat(pA)+'</div><div class="'+(verified?'ok':'bad')+'">'+(verified?'Verified: p(A) is the zero matrix (max |entry| = '+maxAbs(pA).toExponential(1)+')':'Not zero — check inputs')+'</div></div>'+
+   '<div class="card"><h2>(c) A<sup>−1</sup> via Cayley-Hamilton</h2>'+(inv?'<div class="scroll">'+mat(inv)+'</div><div class="note">Check: max |A·A⁻¹ − I| = '+maxAbs(add(mul(A,inv),scl(I(n),-1))).toExponential(1)+'</div>':'<div class="bad">det A = 0, so A is singular: no inverse.</div>')+'</div>'+
+   '<div class="card"><h2>(d) A<sup>'+k+'</sup> via Cayley-Hamilton</h2><div class="scroll">'+mat(Ak)+'</div><div class="note">Relative difference from direct multiplication: '+err.toExponential(1)+'</div></div>'+
+   '<div class="card"><h2>(e) Time comparison (µs per call)</h2><div class="scroll"><table class="mono"><tr><td>Cayley-Hamilton&nbsp;</td><td>'+tc.toFixed(2)+'</td></tr><tr><td>Direct A·A·…·A</td><td>'+td.toFixed(2)+'</td></tr><tr><td>Repeated squaring</td><td>'+ts.toFixed(2)+'</td></tr></table></div>'+
+   '<div class="note">For small k on a 3×3 matrix direct multiplication can win: C-H has overhead. Its advantage is that every power reduces to at most n matrix products on A⁰…Aⁿ⁻¹ once r(λ) is known.</div><div id="chart"></div></div>';
+  plot(A,[2,4,8,16,32,64,128]);};
+build();$('run').click();
+</script></body></html>
